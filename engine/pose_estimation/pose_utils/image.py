@@ -43,11 +43,19 @@ def img_center_padding(img_np, pad_ratio):
 
     return img_pad_np, offset_w, offset_h
 
-def normalize_rgb_tensor(img, imgenet_normalization=True):
+def normalize_rgb_tensor(img, imgenet_normalization=True,mean = None, std = None):
     img = img / 255.
     if imgenet_normalization:
-        img = (img - torch.tensor(IMG_NORM_MEAN, device=img.device).view(1, 3, 1, 1)) / torch.tensor(IMG_NORM_STD, device=img.device).view(1, 3, 1, 1)
+        if mean is None or std is None:
+            img = (img - torch.tensor(IMG_NORM_MEAN, device=img.device).view(1, 3, 1, 1)) / torch.tensor(IMG_NORM_STD, device=img.device).view(1, 3, 1, 1)
+        else:
+            img = (img - mean) / std
     return img
+# def normalize_rgb_tensor(img, imgenet_normalization=True):
+#     img = img / 255.
+#     if imgenet_normalization:
+#         img = (img - torch.tensor(IMG_NORM_MEAN, device=img.device).view(1, 3, 1, 1)) / torch.tensor(IMG_NORM_STD, device=img.device).view(1, 3, 1, 1)
+#     return img
 
 def normalize_rgb(img, imagenet_normalization=True):
     """

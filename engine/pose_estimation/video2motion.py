@@ -10,6 +10,8 @@ import os
 import sys
 from math import sqrt
 
+IMG_NORM_MEAN = [0.485, 0.456, 0.406]
+IMG_NORM_STD = [0.229, 0.224, 0.225]
 current_dir_path = os.path.dirname(__file__)
 sys.path.append(current_dir_path + "/../pose_estimation")
 import argparse
@@ -85,8 +87,11 @@ def images_crop(images, bboxes, target_size, device=torch.device("cuda")):
     crop_annotations = []
     i = 0
     raw_img_size = max(images[0].shape[:2])
-    for img, bbox in zip(images, bboxes):
+    #TODO check the fix
 
+    mean = torch.tensor(IMG_NORM_MEAN, device=device).view(1, 3, 1, 1)
+    std = torch.tensor(IMG_NORM_STD, device=device).view(1, 3, 1, 1)
+    for img, bbox in zip(images, bboxes):
         left = max(0, int(bbox[0] - bbox[2] // 2))
         right = min(img.shape[1] - 1, int(bbox[0] + bbox[2] // 2))
         top = max(0, int(bbox[1] - bbox[3] // 2))
@@ -110,7 +115,7 @@ def images_crop(images, bboxes, target_size, device=torch.device("cuda")):
             value=0,
         )
 
-        resize_img = normalize_rgb_tensor(crop_img)
+        resize_img = normalize_rgb_tensor(crop_img, mean = mean, std = std)
 
         crop_img_list.append(resize_img)
         crop_annotations.append(
