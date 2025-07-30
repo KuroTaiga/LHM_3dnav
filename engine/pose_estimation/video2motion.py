@@ -362,30 +362,53 @@ class Video2MotionPipeline:
         bboxes = torch.tensor(bboxes, device=self.device)
         bboxes = bbox_xyxy_to_cxcywh(bboxes, scale=1.5)
 
-        crop_images, crop_annotations = images_crop(
-            frames, bboxes, target_size=target_img_size, device=self.device
-        )
+        # crop_images, crop_annotations = images_crop(
+        #     frames, bboxes, target_size=target_img_size, device=self.device
+        # )
 
         all_frame_results = []
-        # model inference
-        for i, image in enumerate(crop_images):
-
-            # Calculate the possible search area for the primary joint (head) based on 2D keypoints
-            # pseudo_idx: The index of the search area center after patching
-            # max_dist: The maximum radius of the search area
+        for i in range(len(frames)):
+            crop_img, crop_annot = images_crop(
+                [frames[i]],[bboxes[i]],target_size = target_img_size, device = self.device
+            )
+            crop_img = crop_img[0]
+            crop_annot = crop_annot[0]
             pseudo_idx, max_dist = generate_pseudo_idx(
                 keypoints[i],
                 patch_size,
-                int(target_img_size / patch_size),
-                crop_annotations[i],
+                int(target_img_size/patch_size),
+                crop_annot,
             )
-            humans = forward_model(
-                self.pose_model, image, K, pseudo_idx=pseudo_idx, max_dist=max_dist
-            )
+            with torch.no_grad():
+                humans = forward_model(
+                    self.pose_model, crop_img, K, pseudo_idx=pseudo_idx, max_dist=max_dist
+                )
             target_human = track_by_area(humans, target_img_size)
-            target_human = project2origin_img(target_human, crop_annotations[i])
-
+            target_human = project2origin_img(target_human, crop_annot)
             all_frame_results.append(target_human)
+            #free mem
+            del crop_img
+            gc.collect()
+            torch.cuda.empty_cache()
+        # model inference
+        # for i, image in enumerate(crop_images):
+
+        #     # Calculate the possible search area for the primary joint (head) based on 2D keypoints
+        #     # pseudo_idx: The index of the search area center after patching
+        #     # max_dist: The maximum radius of the search area
+        #     pseudo_idx, max_dist = generate_pseudo_idx(
+        #         keypoints[i],
+        #         patch_size,
+        #         int(target_img_size / patch_size),
+        #         crop_annotations[i],
+        #     )
+        #     humans = forward_model(
+        #         self.pose_model, image, K, pseudo_idx=pseudo_idx, max_dist=max_dist
+        #     )
+        #     target_human = track_by_area(humans, target_img_size)
+        #     target_human = project2origin_img(target_human, crop_annotations[i])
+
+        #     all_frame_results.append(target_human)
 
         # parse chunk & missed frame padding
         data_chunks = parse_chunks(
