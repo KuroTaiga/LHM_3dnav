@@ -5,7 +5,8 @@
 
 # Ignore compiled Python files
 *.pyc
-
+# Ignore downloaded tar files
+*.tar
 # Ignore editor-specific files
 .vscode/
 .idea/
