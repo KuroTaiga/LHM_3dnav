@@ -390,7 +390,7 @@ class Video2MotionPipeline:
             del crop_img
             gc.collect()
             torch.cuda.empty_cache()
-        # model inference
+        # model inference, old and mem intense
         # for i, image in enumerate(crop_images):
 
         #     # Calculate the possible search area for the primary joint (head) based on 2D keypoints
