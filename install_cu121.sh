@@ -33,3 +33,11 @@ pip install git+https://github.com/camenduru/simple-knn/
 # or
 # git clone https://github.com/camenduru/simple-knn.git
 # pip install ./simple-knn
+
+cd ./LHM_3dnav
+%cd ./engine/pose_estimation
+!pip install mmcv==1.3.9
+!pip install -v -e third-party/ViTPose
+!pip install ultralytics
+%cd ../../
+!mkdir -p inputs/images inputs/videos outputs
