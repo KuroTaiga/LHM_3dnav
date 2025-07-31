@@ -439,10 +439,11 @@ def prepare_motion_seqs(
         motion_seqs_dir, image_folder = predict_motion_seqs_from_images(
             image_folder, save_root, fps
         )
-
+    print(f"motion_seqs_dir: {motion_seqs_dir}, image_folder: {image_folder}")
     motion_seqs = sorted(glob.glob(os.path.join(motion_seqs_dir, "*.json")))
     motion_seqs = motion_seqs[:motion_size]
-
+    #DEBUG
+    print(f"motion_seqs length: {len(motion_seqs)}")
     # source images
     c2ws, intrs, rgbs, bg_colors, masks = [], [], [], [], []
     smplx_params = []
@@ -467,6 +468,9 @@ def prepare_motion_seqs(
             shape_param = smplx_param["betas"]
 
         c2w, intrinsic = _load_pose(smplx_param)
+        if c2w is None or intrinsic is None:
+            print(f"At frame {idx}, c2w or intrinsic is None")
+            print(f"c2w: {c2w}, intrinsic: {intrinsic}, smplx_param: {smplx_param}")
         intrinsic_raw = intrinsic.clone()
         if "expr" not in smplx_raw_data:
             # supports v2.0 data format

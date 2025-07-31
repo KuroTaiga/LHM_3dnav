@@ -44,12 +44,16 @@ np.random.seed(seed=0)
 random.seed(0)
 
 
-def load_video(video_path, pad_ratio, max_resolution):
+def load_video(video_path, pad_ratio, max_resolution,skip_rate=1):
+    #1 out of skip_rate amount of frames will be loaded
     frames = []
     for i in range(2):
         cap = cv2.VideoCapture(video_path)
         assert cap.isOpened(), f"fail to load video file {video_path}"
         fps = cap.get(cv2.CAP_PROP_FPS)
+        #due to frame skipping, we need to calculate the fps again
+        if skip_rate > 1:
+            fps = fps / skip_rate
     
         width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
@@ -59,25 +63,28 @@ def load_video(video_path, pad_ratio, max_resolution):
             height = int(height * downsample_factor)
             width = int(width * downsample_factor)
 
-        
+        frame_count = 0
         offset_w, offset_h = 0, 0
         while cap.isOpened():
             flag, frame = cap.read()
             if not flag:
                 break
-
-            # since the tracker and detector receive BGR images as inputs
-            # frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            if downsample_factor > 0:
-                frame = cv2.resize(
-                    frame,
-                    (width, height),
-                    interpolation=cv2.INTER_AREA,
-                )
-            if pad_ratio > 0:
-                frame, offset_w, offset_h = img_center_padding(frame, pad_ratio)
-            frames.append(frame)
+            if frame_count % skip_rate == 0:
+                # since the tracker and detector receive BGR images as inputs
+                # frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                if downsample_factor > 0:
+                    frame = cv2.resize(
+                        frame,
+                        (width, height),
+                        interpolation=cv2.INTER_AREA,
+                    )
+                if pad_ratio > 0:
+                    frame, offset_w, offset_h = img_center_padding(frame, pad_ratio)
+                
+                frames.append(frame)
+            frame_count += 1
         height, width, _ = frames[0].shape
+    print(f"Finished loading video {video_path}, total frames: {len(frames)}, fps: {fps}, resolution: {width}x{height}")
     return frames, height, width, fps, offset_w, offset_h
 
 
@@ -277,6 +284,8 @@ def parse_chunks(
 
 
 def load_models(model_path, device):
+    #TODO:
+    #Update to use sapiens pipeline
     ckpt_path = os.path.join(model_path, "pose_estimate", "multiHMR_896_L.pt")
     pose_model = load_model(ckpt_path, model_path, device=device)
     print("load hmr")
@@ -307,6 +316,8 @@ class Video2MotionPipeline:
         visualize=True,
         pad_ratio=0.2,
         fov=60,
+        max_frames= None,
+        skip_rate = 1,
     ):
         self.MAX_RESOLUTION = 1280 * 720
         self.device = device
@@ -315,6 +326,8 @@ class Video2MotionPipeline:
         self.pad_ratio = pad_ratio
         self.fov = fov
         self.fps = None
+        self.skip_rate = skip_rate # 1 frame out of this many will be loaded
+        self.max_frames = max_frames # to be used to limit the number of frames loaded
         self.pose_model, self.keypoint_detector, self.smplx_model = load_models(
             model_path, self.device
         )
@@ -528,7 +541,7 @@ class Video2MotionPipeline:
     def __call__(self, video_path, output_path, is_file_only=False):
         start = time.time()
         all_frames, raw_H, raw_W, fps, offset_w, offset_h = load_video(
-            video_path, pad_ratio=self.pad_ratio, max_resolution=self.MAX_RESOLUTION
+            video_path, pad_ratio=self.pad_ratio, max_resolution=self.MAX_RESOLUTION, skip_rate=self.skip_rate
         )
         self.fps = fps
         video_length = len(all_frames)
@@ -617,7 +630,7 @@ if __name__ == "__main__":
 
     FOV = 60  # follow the setting of multihmr
     device = torch.device("cuda:0")
-
+    
     pipeline = Video2MotionPipeline(
         opt.model_path,
         opt.fitting_steps,
