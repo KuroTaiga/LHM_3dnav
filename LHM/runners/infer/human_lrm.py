@@ -622,6 +622,7 @@ class HumanLRMInferrer(Inferrer):
         dump_tmp_dir: str,  # require by extracting motion seq from video, to save some results
         dump_image_dir: str,
         dump_video_path: str,
+        dump_mesh_dir: str,  # Directory to save .ply files
         shape_param=None,
     ):
 
@@ -885,8 +886,8 @@ class HumanLRMInferrer(Inferrer):
             np.uint8
         )
         Image.fromarray(vis_ref_img).save(save_ref_img_path)
-        # read motion seq
 
+        # read motion seq
         motion_name = os.path.dirname(
             motion_seqs_dir[:-1] if motion_seqs_dir[-1] == "/" else motion_seqs_dir
         )
@@ -911,7 +912,6 @@ class HumanLRMInferrer(Inferrer):
             self.motion_dict[motion_name] = motion_seq
 
         camera_size = len(motion_seq["motion_seqs"])
-
         device = "cuda"
         dtype = torch.float32
         shape_param = torch.tensor(shape_param, dtype=dtype).unsqueeze(0)
@@ -919,6 +919,7 @@ class HumanLRMInferrer(Inferrer):
         self.model.to(dtype)
         smplx_params = motion_seq['smplx_params']
         smplx_params['betas'] = shape_param.to(device)
+
         gs_model_list, query_points, transform_mat_neutral_pose = self.model.infer_single_view(
             image.unsqueeze(0).to(device, dtype),
             src_head_rgb.unsqueeze(0).to(device, dtype),
@@ -938,12 +939,38 @@ class HumanLRMInferrer(Inferrer):
         for batch_i in range(0, camera_size, batch_size):
             with torch.no_grad():
                 print(f"batch: {batch_i}, total: {camera_size //batch_size +1} ")
-
+                current_batch_size = min(batch_size, camera_size - batch_i)
+                print(f"current_batch_size: {current_batch_size}")
                 keys = [
                     "root_pose", "body_pose", "jaw_pose", "leye_pose",
                     "reye_pose", "lhand_pose", "rhand_pose", "trans",
                     "focal", "princpt", "img_size_wh", "expr",
                 ]
+
+                # let's do single frame exporting
+                for frame_idx_in_batch in range(current_batch_size):
+                    global_frame_idx = frame_counter + frame_idx_in_batch
+                    #Create single frame parameters
+                    single_frame_smplx_params = dict()
+                    single_frame_smplx_params["betas"] = shape_param.to(device)
+                    single_frame_smplx_params['transform_mat_neutral_pose'] = transform_mat_neutral_pose
+                    for key in keys:
+                        single_frame_smplx_params[key] = motion_seq["smplx_params"][key][
+                            :, batch_i + frame_idx_in_batch : batch_i + frame_idx_in_batch + 1
+                        ].to(device)
+                    # Export GS for each frame
+                    try:
+                        gs_result = self.model.animation_infer_gs(gs_model_list, query_points, single_frame_smplx_params)
+                        if gs_result is not None:
+                            mesh_path = os.path.join(dump_mesh_dir, f"frame_{global_frame_idx:05d}.ply")
+                            if hasattr(gs_result, 'save_ply'):
+                                gs_result.save_ply(mesh_path)
+                                print(f"Exported frame {global_frame_idx} GS to {mesh_path}")
+                            else:
+                                self._export_gs_to_ply(gs_result, mesh_path)
+                                print(f"Exported frame {global_frame_idx} GS to {mesh_path}")
+                    except Exception as e:
+                        print(f"Failed to export GS for frame {global_frame_idx}: {e}")
 
                 batch_smplx_params = dict()
                 batch_smplx_params["betas"] = shape_param.to(device)
@@ -952,7 +979,7 @@ class HumanLRMInferrer(Inferrer):
                     batch_smplx_params[key] = motion_seq["smplx_params"][key][
                         :, batch_i : batch_i + batch_size
                     ].to(device)
-
+                
                 # Get animation results
                 res = self.model.animation_infer(gs_model_list, query_points, batch_smplx_params,
                     render_c2ws=motion_seq["render_c2ws"][
@@ -1124,8 +1151,8 @@ class HumanLRMInferrer(Inferrer):
                     dump_mesh_dir=dump_mesh_dir,
                     shape_param=shape_pose.beta,
                 )
-            elif self.cfg.export_gc is not None:
-                if self.cfg.export_gc:
+            elif self.cfg.export_gs is not None:
+                if self.cfg.export_gs:
                     print("Exporting Per Frame GS")
                     self.infer_single_with_gs_export(
                         image_path,
