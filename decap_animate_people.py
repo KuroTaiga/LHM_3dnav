@@ -7,9 +7,9 @@ from LHM.models.rendering.smplx import smplx
 from tqdm import tqdm
 
 # === CONFIG ===
-json_folder = "../TeleEnv/smplx_params"
-base_ply_path = ".../TeleEnv/T_frontview.ply"
-output_dir = "../TeleEnv/animated_3dgs"
+json_folder = "./outputs/custom_motion/T_frontview/walk_45/smplx_params"
+base_ply_path ="./exps/meshs/video_human_benchmark/human-lrm-1B/T_frontview.ply"
+output_dir = "./outputs/animated_3dgs"
 human_model_path = "./pretrained_models/human_model_files"
 gender = "neutral"
 os.makedirs(output_dir, exist_ok=True)
@@ -80,7 +80,8 @@ for frame_idx, fname in tqdm(enumerate(json_files), total=len(json_files)):
         expression=torch.tensor(params['expression']).unsqueeze(0),
         body_pose=torch.tensor(params['body_pose']).unsqueeze(0),
         global_orient=torch.tensor(params['global_orient']).unsqueeze(0),
-        transl=torch.tensor(params['trans']).unsqueeze(0),
+        # transl=torch.tensor(params['trans']).unsqueeze(0),
+        transl = torch.zeros((1, 3)),  # Use zero translation for now, so that it doesn't move
         left_hand_pose=torch.tensor(params['left_hand_pose']).unsqueeze(0),
         right_hand_pose=torch.tensor(params['right_hand_pose']).unsqueeze(0),
         jaw_pose=torch.tensor(params['jaw_pose']).unsqueeze(0),

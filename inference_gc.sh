@@ -2,8 +2,10 @@
 # Given pose sequence, generating animation video with Gaussian Splatting export
 
 MODEL_NAME=LHM-1B
-IMAGE_INPUT="./train_data/example_imgs/"
-MOTION_SEQS_DIR="./train_data/motion_video/mimo6/smplx_params/"
+# IMAGE_INPUT="./train_data/example_imgs/"
+IMAGE_INPUT="./inputs/images/T_frontview/"
+# MOTION_SEQS_DIR="./train_data/motion_video/mimo6/smplx_params/"
+MOTION_SEQS_DIR="./outputs/custom_motion/T_frontview/walk_45/inplace_smplx_params"
 EXPORT_GS=true
 
 MODEL_NAME=${1:-$MODEL_NAME}
