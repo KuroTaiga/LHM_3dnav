@@ -20,7 +20,7 @@ from tqdm.auto import tqdm
 
 from engine.pose_estimation.pose_estimator import PoseEstimator
 from engine.SegmentAPI.base import Bbox
-
+from pathlib import Path
 # from LHM.utils.model_download_utils import AutoModelQuery
 from LHM.utils.model_download_utils import AutoModelQuery
 
@@ -291,6 +291,8 @@ def parse_configs():
         cli_cfg.export_mesh = None
     if "export_video" not in cli_cfg: 
         cli_cfg.export_video= None
+    if "export_gs" not in cli_cfg:
+        cli_cfg.export_gs = None
 
     query_model = AutoModelQuery()
 
@@ -811,6 +813,242 @@ class HumanLRMInferrer(Inferrer):
             gradio_codec=False,
             verbose=True,
         )
+    def infer_single_with_gs_export(
+        self,
+        image_path: str,
+        motion_seqs_dir,
+        motion_img_dir,
+        motion_video_read_fps,
+        export_video: bool,
+        export_mesh: bool,
+        dump_tmp_dir: str,
+        dump_image_dir: str,
+        dump_video_path: str,
+        dump_mesh_dir: str,  # Directory to save .ply files
+        shape_param=None,
+    ):
+        """infer single image with gs export, modified based on infer_single"""
+        source_size = self.cfg.source_size
+        render_size = self.cfg.render_size
+        # render_views = self.cfg.render_views
+        render_fps = self.cfg.render_fps
+        # mesh_size = self.cfg.mesh_size
+        # mesh_thres = self.cfg.mesh_thres
+        # frame_size = self.cfg.frame_size
+        # source_cam_dist = self.cfg.source_cam_dist if source_cam_dist is None else source_cam_dist
+        aspect_standard = 5.0 / 3
+        motion_img_need_mask = self.cfg.get("motion_img_need_mask", False)  # False
+        vis_motion = self.cfg.get("vis_motion", False)  # False
+        
+        if self.parsingnet is not None:
+            parsing_mask = self.parsing(image_path)
+        else:
+            img_np = cv2.imread(image_path)
+            remove_np = remove(img_np)
+            parsing_mask = remove_np[...,3]
+
+        # prepare reference image
+        image, _, _ = infer_preprocess_image(
+            image_path,
+            mask=parsing_mask,
+            intr=None,
+            pad_ratio=0,
+            bg_color=1.0,
+            max_tgt_size=896,
+            aspect_standard=aspect_standard,
+            enlarge_ratio=[1.0, 1.0],
+            render_tgt_size=source_size,
+            multiply=14,
+            need_mask=True,
+        )
+        try:
+            src_head_rgb = self.crop_face_image(image_path)
+        except:
+            print("w/o head input!")
+            src_head_rgb = np.zeros((112, 112, 3), dtype=np.uint8)
+        try:
+            src_head_rgb = cv2.resize(
+                src_head_rgb,
+                dsize=(self.cfg.src_head_size, self.cfg.src_head_size),
+                interpolation=cv2.INTER_AREA,
+            )  # resize to dino size
+        except:
+            src_head_rgb = np.zeros(
+                (self.cfg.src_head_size, self.cfg.src_head_size, 3), dtype=np.uint8
+            )
+        src_head_rgb = (
+            torch.from_numpy(src_head_rgb / 255.0).float().permute(2, 0, 1).unsqueeze(0)
+        )# [1, 3, H, W]
+        # save masked image for vis
+        save_ref_img_path = os.path.join(
+            dump_tmp_dir, "refer_" + os.path.basename(image_path)
+        )
+        vis_ref_img = (image[0].permute(1, 2, 0).cpu().detach().numpy() * 255).astype(
+            np.uint8
+        )
+        Image.fromarray(vis_ref_img).save(save_ref_img_path)
+        # read motion seq
+
+        motion_name = os.path.dirname(
+            motion_seqs_dir[:-1] if motion_seqs_dir[-1] == "/" else motion_seqs_dir
+        )
+        motion_name = os.path.basename(motion_name)
+
+        if motion_name in self.motion_dict:
+            motion_seq = self.motion_dict[motion_name]
+        else:
+            motion_seq = prepare_motion_seqs(
+                motion_seqs_dir,
+                motion_img_dir,
+                save_root=dump_tmp_dir,
+                fps=motion_video_read_fps,
+                bg_color=1.0,
+                aspect_standard=aspect_standard,
+                enlarge_ratio=[1.0, 1, 0],
+                render_image_res=render_size,
+                multiply=16,
+                need_mask=motion_img_need_mask,
+                vis_motion=vis_motion,
+            )
+            self.motion_dict[motion_name] = motion_seq
+
+        camera_size = len(motion_seq["motion_seqs"])
+
+        device = "cuda"
+        dtype = torch.float32
+        shape_param = torch.tensor(shape_param, dtype=dtype).unsqueeze(0)
+
+        self.model.to(dtype)
+        smplx_params = motion_seq['smplx_params']
+        smplx_params['betas'] = shape_param.to(device)
+        gs_model_list, query_points, transform_mat_neutral_pose = self.model.infer_single_view(
+            image.unsqueeze(0).to(device, dtype),
+            src_head_rgb.unsqueeze(0).to(device, dtype),
+            None,
+            None,
+            render_c2ws=motion_seq["render_c2ws"].to(device),
+            render_intrs=motion_seq["render_intrs"].to(device),
+            render_bg_colors=motion_seq["render_bg_colors"].to(device),
+            smplx_params={
+                k: v.to(device) for k, v in smplx_params.items()
+            },
+        )
+        os.makedirs(dump_mesh_dir, exist_ok=True)
+        batch_list = []
+        batch_size = 40
+        frame_counter = 0  # Counter for frame index in the output mesh files
+        for batch_i in range(0, camera_size, batch_size):
+            with torch.no_grad():
+                print(f"batch: {batch_i}, total: {camera_size //batch_size +1} ")
+
+                keys = [
+                    "root_pose", "body_pose", "jaw_pose", "leye_pose",
+                    "reye_pose", "lhand_pose", "rhand_pose", "trans",
+                    "focal", "princpt", "img_size_wh", "expr",
+                ]
+
+                batch_smplx_params = dict()
+                batch_smplx_params["betas"] = shape_param.to(device)
+                batch_smplx_params['transform_mat_neutral_pose'] = transform_mat_neutral_pose
+                for key in keys:
+                    batch_smplx_params[key] = motion_seq["smplx_params"][key][
+                        :, batch_i : batch_i + batch_size
+                    ].to(device)
+
+                # Get animation results
+                res = self.model.animation_infer(gs_model_list, query_points, batch_smplx_params,
+                    render_c2ws=motion_seq["render_c2ws"][
+                        :, batch_i : batch_i + batch_size
+                    ].to(device),
+                    render_intrs=motion_seq["render_intrs"][
+                        :, batch_i : batch_i + batch_size
+                    ].to(device),
+                    render_bg_colors=motion_seq["render_bg_colors"][
+                        :, batch_i : batch_i + batch_size
+                    ].to(device),
+                )
+                
+                # Export GS models for each frame in this batch
+                if "3dgs" in res and res["3dgs"] is not None:
+                    gs_models = res["3dgs"]  # This should be a list or tensor of GS models
+                    
+                    # Handle different possible formats of gs_models
+                    if isinstance(gs_models, list):
+                        for i, gs_model in enumerate(gs_models):
+                            frame_idx = frame_counter + i
+                            mesh_path = os.path.join(dump_mesh_dir, f"frame_{frame_idx:05d}.ply")
+                            try:
+                                if hasattr(gs_model, 'save_ply'):
+                                    gs_model.save_ply(mesh_path)
+                                else:
+                                    # Alternative method if save_ply doesn't exist
+                                    self._export_gs_to_ply(gs_model, mesh_path)
+                                print(f"Exported frame {frame_idx} GS to {mesh_path}")
+                            except Exception as e:
+                                print(f"Failed to export frame {frame_idx}: {e}")
+                                
+                    elif hasattr(gs_models, 'shape') and len(gs_models.shape) > 0:
+                        # If gs_models is a batched tensor/object
+                        batch_frames = min(batch_size, gs_models.shape[0] if hasattr(gs_models, 'shape') else len(gs_models))
+                        for i in range(batch_frames):
+                            frame_idx = frame_counter + i
+                            mesh_path = os.path.join(dump_mesh_dir, f"frame_{frame_idx:05d}.ply")
+                            try:
+                                gs_model = gs_models[i] if hasattr(gs_models, '__getitem__') else gs_models
+                                if hasattr(gs_model, 'save_ply'):
+                                    gs_model.save_ply(mesh_path)
+                                else:
+                                    self._export_gs_to_ply(gs_model, mesh_path)
+                                print(f"Exported frame {frame_idx} GS to {mesh_path}")
+                            except Exception as e:
+                                print(f"Failed to export frame {frame_idx}: {e}")
+                    else:
+                        # Single GS model for the entire batch
+                        mesh_path = os.path.join(dump_mesh_dir, f"frame_{frame_counter:05d}.ply")
+                        try:
+                            if hasattr(gs_models, 'save_ply'):
+                                gs_models.save_ply(mesh_path)
+                            else:
+                                self._export_gs_to_ply(gs_models, mesh_path)
+                            print(f"Exported batch GS to {mesh_path}")
+                        except Exception as e:
+                            print(f"Failed to export batch GS: {e}")
+                else:
+                    try:
+                        # Get GS models using animation_infer_gs method
+                        gs_result = self.model.animation_infer_gs(gs_model_list, query_points, batch_smplx_params)
+                        if gs_result is not None:
+                            mesh_path = os.path.join(dump_mesh_dir, f"frame_{frame_counter:05d}.ply")
+                            if hasattr(gs_result, 'save_ply'):
+                                gs_result.save_ply(mesh_path)
+                                print(f"Exported frame {frame_counter} GS to {mesh_path}")
+                            else:
+                                self._export_gs_to_ply(gs_result, mesh_path)
+                    except Exception as e:
+                        print(f"Failed to export GS using animation_infer_gs: {e}")
+                comp_rgb = res["comp_rgb"]
+                comp_mask = res["comp_mask"]
+                comp_mask[comp_mask < 0.5] = 0.0
+                comp_rgb = res["comp_rgb"] # [Nv, H, W, 3], 0-1
+            
+                batch_rgb = comp_rgb * comp_mask + (1 - comp_mask) * 1
+                batch_rgb = (batch_rgb.clamp(0,1) * 255).to(torch.uint8).detach().cpu().numpy()
+                batch_list.append(batch_rgb)
+
+                frame_counter += min(batch_size, camera_size - batch_i)
+                del res
+                torch.cuda.empty_cache()
+        rgb = np.concatenate(batch_list, axis=0)
+        os.makedirs(os.path.dirname(dump_video_path), exist_ok=True)
+        print(f"save video to {dump_video_path}")
+
+        images_to_video(
+            rgb,
+            output_path=dump_video_path,
+            fps=render_fps,
+            gradio_codec=False,
+            verbose=True,
+        )
 
     def infer(self):
 
@@ -865,6 +1103,8 @@ class HumanLRMInferrer(Inferrer):
             dump_mesh_dir = os.path.join(
                 self.cfg.mesh_dump,
                 subdir_path,
+                motion_name,
+                f"{uid}_motion",
             )
             dump_tmp_dir = os.path.join(self.cfg.image_dump, subdir_path, "tmp_res")
             os.makedirs(dump_image_dir, exist_ok=True)
@@ -885,6 +1125,20 @@ class HumanLRMInferrer(Inferrer):
                     dump_mesh_dir=dump_mesh_dir,
                     shape_param=shape_pose.beta,
                 )
+            elif self.cfg.export_gc is not None:
+                self.infer_single_with_gs_export(
+                    image_path,
+                    motion_seqs_dir=self.cfg.motion_seqs_dir,
+                    motion_img_dir=self.cfg.motion_img_dir,
+                    motion_video_read_fps=self.cfg.motion_video_read_fps,
+                    export_video=self.cfg.export_video,
+                    export_mesh=self.cfg.export_mesh,
+                    dump_tmp_dir=dump_tmp_dir,
+                    dump_image_dir=dump_image_dir,
+                    dump_video_path=dump_video_path,
+                    dump_mesh_dir=dump_mesh_dir,
+                    shape_param=shape_pose.beta,
+                )
             else:
                 self.infer_single(
                     image_path,
@@ -896,9 +1150,79 @@ class HumanLRMInferrer(Inferrer):
                     dump_tmp_dir=dump_tmp_dir,
                     dump_image_dir=dump_image_dir,
                     dump_video_path=dump_video_path,
+                    dump_mesh_dir=dump_mesh_dir,
                     shape_param=shape_pose.beta,
                 )
-
+    def _export_gs_to_ply(self, gs_model, output_path):
+        """
+        Helper function to export GS model to PLY format
+        This function handles cases where save_ply method might not be available
+        """
+        try:
+            # Method 1: Direct save_ply if available
+            if hasattr(gs_model, 'save_ply'):
+                gs_model.save_ply(output_path)
+                return
+                
+            # Method 2: If GS model has vertices and faces
+            if hasattr(gs_model, 'vertices') and hasattr(gs_model, 'faces'):
+                from pytorch3d.io import save_ply
+                save_ply(output_path, gs_model.vertices, gs_model.faces)
+                return
+                
+            # Method 3: If GS model has points/positions and other attributes
+            if hasattr(gs_model, 'get_xyz'):
+                positions = gs_model.get_xyz()
+                
+                # Create basic PLY header
+                header = [
+                    "ply",
+                    "format ascii 1.0",
+                    f"element vertex {positions.shape[0]}",
+                    "property float x",
+                    "property float y", 
+                    "property float z"
+                ]
+                
+                # Add color properties if available
+                if hasattr(gs_model, 'get_features') or hasattr(gs_model, 'get_color'):
+                    header.extend([
+                        "property uchar red",
+                        "property uchar green", 
+                        "property uchar blue"
+                    ])
+                    
+                header.append("end_header")
+                
+                # Write PLY file
+                with open(output_path, 'w') as f:
+                    for line in header:
+                        f.write(line + '\n')
+                        
+                    # Write vertex data
+                    for i in range(positions.shape[0]):
+                        pos = positions[i].cpu().numpy() if hasattr(positions, 'cpu') else positions[i]
+                        line = f"{pos[0]} {pos[1]} {pos[2]}"
+                        
+                        # Add color if available
+                        if hasattr(gs_model, 'get_features'):
+                            colors = gs_model.get_features()[i].cpu().numpy() if hasattr(gs_model.get_features(), 'cpu') else gs_model.get_features()[i]
+                            colors = (colors * 255).astype(int)
+                            line += f" {colors[0]} {colors[1]} {colors[2]}"
+                        elif hasattr(gs_model, 'get_color'):
+                            colors = gs_model.get_color()[i].cpu().numpy() if hasattr(gs_model.get_color(), 'cpu') else gs_model.get_color()[i]
+                            colors = (colors * 255).astype(int)
+                            line += f" {colors[0]} {colors[1]} {colors[2]}"
+                            
+                        f.write(line + '\n')
+                return
+                
+            print(f"Warning: Could not determine how to export GS model to {output_path}")
+            
+        except Exception as e:
+            print(f"Error exporting GS model to PLY: {e}")
+        #TODO: finish implemetaions
+    #TODO: Mordify core_fn OPTIONAL it's for gradio
 
 @REGISTRY_RUNNERS.register("infer.human_lrm_video")
 class HumanLRMVideoInferrer(HumanLRMInferrer):
