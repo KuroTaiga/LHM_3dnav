@@ -276,8 +276,6 @@ def infer_preprocess_image(
 
 
 def parse_configs():
-
-
     download_geo_files()
 
     parser = argparse.ArgumentParser()
@@ -1110,6 +1108,7 @@ class HumanLRMInferrer(Inferrer):
             os.makedirs(dump_image_dir, exist_ok=True)
             os.makedirs(dump_tmp_dir, exist_ok=True)
             os.makedirs(dump_mesh_dir, exist_ok=True)
+            print(f"Dump paths: vid {dump_video_path},  img {dump_image_dir}, mesh {dump_mesh_dir}, tmp {dump_tmp_dir}")
 
             shape_pose = self.pose_estimator(image_path)
 
@@ -1126,19 +1125,36 @@ class HumanLRMInferrer(Inferrer):
                     shape_param=shape_pose.beta,
                 )
             elif self.cfg.export_gc is not None:
-                self.infer_single_with_gs_export(
-                    image_path,
-                    motion_seqs_dir=self.cfg.motion_seqs_dir,
-                    motion_img_dir=self.cfg.motion_img_dir,
-                    motion_video_read_fps=self.cfg.motion_video_read_fps,
-                    export_video=self.cfg.export_video,
-                    export_mesh=self.cfg.export_mesh,
-                    dump_tmp_dir=dump_tmp_dir,
-                    dump_image_dir=dump_image_dir,
-                    dump_video_path=dump_video_path,
-                    dump_mesh_dir=dump_mesh_dir,
-                    shape_param=shape_pose.beta,
-                )
+                if self.cfg.export_gc:
+                    print("Exporting Per Frame GS")
+                    self.infer_single_with_gs_export(
+                        image_path,
+                        motion_seqs_dir=self.cfg.motion_seqs_dir,
+                        motion_img_dir=self.cfg.motion_img_dir,
+                        motion_video_read_fps=self.cfg.motion_video_read_fps,
+                        export_video=self.cfg.export_video,
+                        export_mesh=self.cfg.export_mesh,
+                        dump_tmp_dir=dump_tmp_dir,
+                        dump_image_dir=dump_image_dir,
+                        dump_video_path=dump_video_path,
+                        dump_mesh_dir=dump_mesh_dir,
+                        shape_param=shape_pose.beta,
+                    )
+                else:
+                    print("Export GS mesh canonical pose only")
+                    self.infer_single_with_gs_export(
+                        image_path,
+                        motion_seqs_dir=self.cfg.motion_seqs_dir,
+                        motion_img_dir=self.cfg.motion_img_dir,
+                        motion_video_read_fps=self.cfg.motion_video_read_fps,
+                        export_video=self.cfg.export_video,
+                        export_mesh=self.cfg.export_mesh,
+                        dump_tmp_dir=dump_tmp_dir,
+                        dump_image_dir=dump_image_dir,
+                        dump_video_path=dump_video_path,
+                        dump_mesh_dir=dump_mesh_dir,
+                        shape_param=shape_pose.beta,
+                    )
             else:
                 self.infer_single(
                     image_path,
@@ -1158,23 +1174,42 @@ class HumanLRMInferrer(Inferrer):
         Helper function to export GS model to PLY format
         This function handles cases where save_ply method might not be available
         """
+        print(f"Exporting GS model to {output_path}")
         try:
             # Method 1: Direct save_ply if available
             if hasattr(gs_model, 'save_ply'):
+                print("Directly saving GS model to PLY using save_ply method.")
                 gs_model.save_ply(output_path)
                 return
                 
-            # Method 2: If GS model has vertices and faces
-            if hasattr(gs_model, 'vertices') and hasattr(gs_model, 'faces'):
-                from pytorch3d.io import save_ply
-                save_ply(output_path, gs_model.vertices, gs_model.faces)
-                return
+            if hasattr(gs_model, 'xyz') and hasattr(gs_model, 'opacity'):
+                positions = gs_model.xyz.detach().cpu().numpy()
                 
-            # Method 3: If GS model has points/positions and other attributes
-            if hasattr(gs_model, 'get_xyz'):
-                positions = gs_model.get_xyz()
+                # Get optional attributes
+                colors = None
+                if hasattr(gs_model, 'shs'):
+                    if gs_model.use_rgb:
+                        # RGB format
+                        colors = gs_model.shs.squeeze(1).detach().cpu().numpy()
+                    else:
+                        # SH format - convert first component to RGB
+                        from LHM.models.rendering.utils.sh_utils import SH2RGB
+                        colors = SH2RGB(gs_model.shs[:, :1]).squeeze(1).detach().cpu().numpy()
+                    colors = (np.clip(colors, 0, 1) * 255).astype(np.uint8)
                 
-                # Create basic PLY header
+                opacities = None
+                if hasattr(gs_model, 'opacity'):
+                    opacities = gs_model.opacity.detach().cpu().numpy()
+                    
+                scaling = None
+                if hasattr(gs_model, 'scaling'):
+                    scaling = gs_model.scaling.detach().cpu().numpy()
+                    
+                rotation = None
+                if hasattr(gs_model, 'rotation'):
+                    rotation = gs_model.rotation.detach().cpu().numpy()
+                
+                # Create PLY header
                 header = [
                     "ply",
                     "format ascii 1.0",
@@ -1184,44 +1219,101 @@ class HumanLRMInferrer(Inferrer):
                     "property float z"
                 ]
                 
-                # Add color properties if available
-                if hasattr(gs_model, 'get_features') or hasattr(gs_model, 'get_color'):
+                # Add color properties
+                if colors is not None:
                     header.extend([
                         "property uchar red",
                         "property uchar green", 
                         "property uchar blue"
                     ])
                     
+                # Add opacity property
+                if opacities is not None:
+                    header.append("property float opacity")
+                    
+                # Add scaling properties
+                if scaling is not None:
+                    header.extend([
+                        "property float scale_0",
+                        "property float scale_1",
+                        "property float scale_2"
+                    ])
+                    
+                # Add rotation properties
+                if rotation is not None:
+                    header.extend([
+                        "property float rot_0",
+                        "property float rot_1", 
+                        "property float rot_2",
+                        "property float rot_3"
+                    ])
+                    
                 header.append("end_header")
                 
                 # Write PLY file
+                os.makedirs(os.path.dirname(output_path), exist_ok=True)
                 with open(output_path, 'w') as f:
+                    # Write header
                     for line in header:
                         f.write(line + '\n')
                         
                     # Write vertex data
                     for i in range(positions.shape[0]):
-                        pos = positions[i].cpu().numpy() if hasattr(positions, 'cpu') else positions[i]
-                        line = f"{pos[0]} {pos[1]} {pos[2]}"
+                        pos = positions[i]
+                        line = f"{pos[0]:.6f} {pos[1]:.6f} {pos[2]:.6f}"
                         
-                        # Add color if available
-                        if hasattr(gs_model, 'get_features'):
-                            colors = gs_model.get_features()[i].cpu().numpy() if hasattr(gs_model.get_features(), 'cpu') else gs_model.get_features()[i]
-                            colors = (colors * 255).astype(int)
-                            line += f" {colors[0]} {colors[1]} {colors[2]}"
-                        elif hasattr(gs_model, 'get_color'):
-                            colors = gs_model.get_color()[i].cpu().numpy() if hasattr(gs_model.get_color(), 'cpu') else gs_model.get_color()[i]
-                            colors = (colors * 255).astype(int)
-                            line += f" {colors[0]} {colors[1]} {colors[2]}"
+                        # Add color
+                        if colors is not None:
+                            c = colors[i]
+                            line += f" {c[0]} {c[1]} {c[2]}"
                             
+                        # Add opacity
+                        if opacities is not None:
+                            line += f" {opacities[i][0]:.6f}"
+                            
+                        # Add scaling
+                        if scaling is not None:
+                            s = scaling[i]
+                            line += f" {s[0]:.6f} {s[1]:.6f} {s[2]:.6f}"
+                            
+                        # Add rotation
+                        if rotation is not None:
+                            r = rotation[i]
+                            line += f" {r[0]:.6f} {r[1]:.6f} {r[2]:.6f} {r[3]:.6f}"
+                                
                         f.write(line + '\n')
-                return
                 
+                print(f"Successfully exported GS model to {output_path}")
+                return
+            # Method 3: If GS model has points/positions and other attributes
+            if hasattr(gs_model, 'cpu') and hasattr(gs_model, 'numpy'):
+                positions = gs_model.cpu().numpy()
+                if len(positions.shape) == 2 and positions.shape[1] >= 3:
+                    header = [
+                        "ply",
+                        "format ascii 1.0", 
+                        f"element vertex {positions.shape[0]}",
+                        "property float x",
+                        "property float y",
+                        "property float z",
+                        "end_header"
+                    ]
+                    
+                    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+                    with open(output_path, 'w') as f:
+                        for line in header:
+                            f.write(line + '\n')
+                        for i in range(positions.shape[0]):
+                            pos = positions[i]
+                            f.write(f"{pos[0]:.6f} {pos[1]:.6f} {pos[2]:.6f}\n")
+                    return
             print(f"Warning: Could not determine how to export GS model to {output_path}")
-            
+            print(f"GS model type: {type(gs_model)}")
+            print(f"GS model attributes: {dir(gs_model) if hasattr(gs_model, '__dict__') else 'No attributes'}")
+      
         except Exception as e:
             print(f"Error exporting GS model to PLY: {e}")
-        #TODO: finish implemetaions
+        
     #TODO: Mordify core_fn OPTIONAL it's for gradio
 
 @REGISTRY_RUNNERS.register("infer.human_lrm_video")
