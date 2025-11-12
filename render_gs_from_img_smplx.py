@@ -12,6 +12,7 @@ import shlex
 import subprocess
 from pathlib import Path
 from typing import Dict, Iterable
+import json
 
 DEFAULT_MODEL = "LHM-1B-HF"
 DEFAULT_IMAGES = Path("../../inputs/images/SHHQ-1.0_samples")
@@ -21,6 +22,68 @@ DEFAULT_NAS_ROOT = Path("/media/lenvono/VariedHumanPlys/SHHQ_walk_fbx")
 
 CMD_BOOL = {True: "True", False: "False"}
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp", ".JPG", ".PNG"}
+
+def normalize_motion_jsons(sequence_folder: Path) -> None:
+    """Ensure every SMPL-X JSON uses the keys/shapes LHM expects."""
+    rename_map = {
+        "global_orient": "root_pose",
+        "transl": "trans",
+        "left_hand_pose": "lhand_pose",
+        "right_hand_pose": "rhand_pose",
+    }
+    default_vectors = {
+        "root_pose": [0.0, 0.0, 0.0],
+        "trans": [0.0, 0.0, 0.0],
+        "jaw_pose": [0.0, 0.0, 0.0],
+        "leye_pose": [0.0, 0.0, 0.0],
+        "reye_pose": [0.0, 0.0, 0.0],
+    }
+    default_hands = {
+        "lhand_pose": [[0.0, 0.0, 0.0] for _ in range(15)],
+        "rhand_pose": [[0.0, 0.0, 0.0] for _ in range(15)],
+    }
+
+    json_files = sorted(sequence_folder.glob("*.json"))
+    if not json_files:
+        print(f"[WARN] No motion JSONs under {sequence_folder}")
+        return
+
+    for json_path in json_files:
+        data = json.loads(json_path.read_text())
+        mutated = False
+
+        # Rename SMPL-X keys to what LHM expects
+        for old_key, new_key in rename_map.items():
+            if old_key in data:
+                data[new_key] = data.pop(old_key)
+                mutated = True
+
+        # Drop metadata blocks that break torch.FloatTensor()
+        if "meta" in data:
+            data.pop("meta")
+            mutated = True
+
+        # Ensure required keys exist
+        for key, default in default_vectors.items():
+            if key not in data:
+                data[key] = list(default)
+                mutated = True
+
+        for key, default in default_hands.items():
+            if key not in data:
+                # deep copy so later edits don’t mutate the template
+                data[key] = [row[:] for row in default]
+                mutated = True
+
+        # Force tuple → list so JSON dumps cleanly
+        for key in (*default_vectors.keys(), "betas", "focal", "princpt", "img_size_wh"):
+            if key in data and isinstance(data[key], tuple):
+                data[key] = list(data[key])
+                mutated = True
+
+        if mutated:
+            json_path.write_text(json.dumps(data, indent=2))
+            print(f"[SANITIZE] {json_path.name} normalized")
 
 
 def run_command(cmd: Iterable[str]) -> None:
@@ -76,6 +139,7 @@ def render_gs(
 ):
     img_folder = img_folder.expanduser().resolve()
     sequence_folder = sequence_folder.expanduser().resolve()
+    normalize_motion_jsons(sequence_folder)
     output_root = output_root.expanduser().resolve()
     nas_root = nas_root.expanduser().resolve()
 
