@@ -1,0 +1,152 @@
+#!/usr/bin/env python3
+"""
+Batch driver for inference_gc.sh that routes every run into:
+    SHHQ_exp/{images,meshs,videos,save_tmp}/{uid}/...
+and mirrors the same structure to NAS at /media/lenvono/VariedHumanPlys/SHHQ_walk_fbx.
+"""
+from __future__ import annotations
+
+import argparse
+import os
+import shlex
+import subprocess
+from pathlib import Path
+from typing import Dict, Iterable
+
+DEFAULT_MODEL = "LHM-1B-HF"
+DEFAULT_IMAGES = Path("../../inputs/images/SHHQ-1.0_samples")
+DEFAULT_MOTION = Path("../../inputs/motion_seq_cleaned/walk_fbx")
+DEFAULT_OUTPUT_ROOT = Path("SHHQ_exp")
+DEFAULT_NAS_ROOT = Path("/media/lenvono/VariedHumanPlys/SHHQ_walk_fbx")
+
+CMD_BOOL = {True: "True", False: "False"}
+IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp", ".JPG", ".PNG"}
+
+
+def run_command(cmd: Iterable[str]) -> None:
+    printable = " ".join(shlex.quote(str(c)) for c in cmd)
+    print(f"[CMD] {printable}")
+    subprocess.run(list(map(str, cmd)), check=True)
+
+
+def build_output_dirs(output_root: Path, uid: str) -> Dict[str, Path]:
+    layout = {
+        "image_dump": output_root / "images" / uid,
+        "mesh_dump": output_root / "meshs" / uid,
+        "video_dump": output_root / "videos" / uid,
+        "save_tmp_dump": output_root / "save_tmp" / uid,
+    }
+    for path in layout.values():
+        path.mkdir(parents=True, exist_ok=True)
+    return layout
+
+
+def sync_uid_to_nas(uid: str, output_root: Path, nas_root: Path) -> None:
+    for sub in ("images", "meshs", "videos", "save_tmp"):
+        src = output_root / sub / uid
+        if not src.exists():
+            continue
+        dst = nas_root / sub / uid
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        run_command(
+            [
+                "rsync",
+                "-a",
+                "--delete",
+                f"{src}/",
+                f"{dst}/",
+            ]
+        )
+        print(f"[NAS] {sub}/{uid} synced to {dst}")
+
+
+def render_gs(
+    img_folder: Path,
+    sequence_folder: Path,
+    model_name: str = DEFAULT_MODEL,
+    output_root: Path = DEFAULT_OUTPUT_ROOT,
+    nas_root: Path = DEFAULT_NAS_ROOT,
+    motion_img_dir: str = "None",
+    vis_motion: bool = True,
+    motion_img_need_mask: bool = True,
+    render_fps: int = 30,
+    motion_video_read_fps: int = 30,
+    export_video: bool = False,
+    export_gs: bool = True,
+):
+    img_folder = img_folder.expanduser().resolve()
+    sequence_folder = sequence_folder.expanduser().resolve()
+    output_root = output_root.expanduser().resolve()
+    nas_root = nas_root.expanduser().resolve()
+
+    print(f"[INFO] processing seq from {sequence_folder}")
+    images = sorted(
+        p for p in img_folder.iterdir() if p.is_file() and p.suffix in IMAGE_SUFFIXES
+    )
+    if not images:
+        print(f"[WARN] No images found under {img_folder}")
+        return
+
+    for img_path in images:
+        uid = img_path.stem
+        print(f"[INFO] Rendering {uid} ({img_path.name})")
+
+        layout = build_output_dirs(output_root, uid)
+        cmd = [
+            "python",
+            "-m",
+            "LHM.launch",
+            "infer.human_lrm",
+            f"model_name={model_name}",
+            f"image_input={img_path}",
+            f"motion_seqs_dir={sequence_folder}",
+            f"motion_img_dir={motion_img_dir}",
+            f"vis_motion={CMD_BOOL[vis_motion]}",
+            f"motion_img_need_mask={CMD_BOOL[motion_img_need_mask]}",
+            f"render_fps={render_fps}",
+            f"motion_video_read_fps={motion_video_read_fps}",
+            f"export_video={CMD_BOOL[export_video]}",
+            f"export_gs={CMD_BOOL[export_gs]}",
+            f"image_dump={layout['image_dump']}",
+            f"mesh_dump={layout['mesh_dump']}",
+            f"video_dump={layout['video_dump']}",
+            f"save_tmp_dump={layout['save_tmp_dump']}",
+        ]
+        try:
+            run_command(cmd)
+            sync_uid_to_nas(uid, output_root, nas_root)
+        except subprocess.CalledProcessError as exc:
+            print(f"[ERROR] Failed on {uid}: {exc}")
+            continue
+        print(f"[DONE] {uid} processed.\n")
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Batch GS inference with SHHQ_exp+NAS layout."
+    )
+    parser.add_argument("--images", type=Path, default=DEFAULT_IMAGES)
+    parser.add_argument("--motion", type=Path, default=DEFAULT_MOTION)
+    parser.add_argument("--model", default=DEFAULT_MODEL)
+    parser.add_argument("--output-root", type=Path, default=DEFAULT_OUTPUT_ROOT)
+    parser.add_argument("--nas-root", type=Path, default=DEFAULT_NAS_ROOT)
+    parser.add_argument("--export-video", action="store_true", default=False)
+    parser.add_argument("--no-export-gs", action="store_false", dest="export_gs")
+    parser.add_argument("--render-fps", type=int, default=30)
+    parser.add_argument("--motion-video-fps", type=int, default=30)
+    return parser.parse_args()
+
+
+if __name__ == "__main__":
+    args = parse_args()
+    render_gs(
+        img_folder=args.images,
+        sequence_folder=args.motion,
+        model_name=args.model,
+        output_root=args.output_root,
+        nas_root=args.nas_root,
+        render_fps=args.render_fps,
+        motion_video_read_fps=args.motion_video_fps,
+        export_video=args.export_video,
+        export_gs=args.export_gs,
+    )
