@@ -18,7 +18,7 @@ DEFAULT_MODEL = "LHM-1B-HF"
 DEFAULT_IMAGES = Path("../../inputs/images/SHHQ-1.0_samples")
 DEFAULT_MOTION = Path("../../inputs/motion_seq_cleaned/walk_fbx")
 DEFAULT_OUTPUT_ROOT = Path("SHHQ_exp")
-DEFAULT_NAS_ROOT = Path("/media/lenvono/VariedHumanPlys/SHHQ_walk_fbx")
+DEFAULT_NAS_ROOT = Path("/mnt/nas/jiankundong/SHHQ_walk_fbx")
 
 CMD_BOOL = {True: "True", False: "False"}
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp", ".JPG", ".PNG"}
@@ -136,7 +136,16 @@ def render_gs(
     motion_video_read_fps: int = 30,
     export_video: bool = False,
     export_gs: bool = True,
+    export_mesh: bool = True,
 ):
+    if export_mesh:
+        print("[INFO] export mesh set, cano ply will be exported and not the plys")
+        output_root = output_root / "cano"
+        nas_root = nas_root / "cano"
+    else:
+        print("[INFO] export mesh not set, only gs will be exported")
+        output_root = output_root / "gs"
+        nas_root = nas_root / "gs"
     img_folder = img_folder.expanduser().resolve()
     sequence_folder = sequence_folder.expanduser().resolve()
     normalize_motion_jsons(sequence_folder)
@@ -156,28 +165,52 @@ def render_gs(
         print(f"[INFO] Rendering {uid} ({img_path.name})")
 
         layout = build_output_dirs(output_root, uid)
-        cmd = [
-            "python",
-            "-m",
-            "LHM.launch",
-            "infer.human_lrm",
-            f"model_name={model_name}",
-            f"image_input={img_path}",
-            f"motion_seqs_dir={sequence_folder}",
-            f"motion_img_dir={motion_img_dir}",
-            f"vis_motion={CMD_BOOL[vis_motion]}",
-            f"motion_img_need_mask={CMD_BOOL[motion_img_need_mask]}",
-            f"render_fps={render_fps}",
-            f"motion_video_read_fps={motion_video_read_fps}",
-            f"export_video={CMD_BOOL[export_video]}",
-            f"export_gs={CMD_BOOL[export_gs]}",
-            f"image_dump={layout['image_dump']}",
-            f"mesh_dump={layout['mesh_dump']}",
-            f"video_dump={layout['video_dump']}",
-            f"save_tmp_dump={layout['save_tmp_dump']}",
-        ]
+        if not export_mesh:
+            cmd = [
+                "python",
+                "-m",
+                "LHM.launch",
+                "infer.human_lrm",
+                f"model_name={model_name}",
+                f"image_input={img_path}",
+                f"motion_seqs_dir={sequence_folder}",
+                f"motion_img_dir={motion_img_dir}",
+                f"vis_motion={CMD_BOOL[vis_motion]}",
+                f"motion_img_need_mask={CMD_BOOL[motion_img_need_mask]}",
+                f"render_fps={render_fps}",
+                f"motion_video_read_fps={motion_video_read_fps}",
+                f"export_video={CMD_BOOL[export_video]}",
+                f"export_gs={CMD_BOOL[export_gs]}",
+                f"image_dump={layout['image_dump']}",
+                f"mesh_dump={layout['mesh_dump']}",
+                f"video_dump={layout['video_dump']}",
+                f"save_tmp_dump={layout['save_tmp_dump']}",
+            ]
+        else:
+            cmd = [
+                "python",
+                "-m",
+                "LHM.launch",
+                "infer.human_lrm",
+                f"model_name={model_name}",
+                f"image_input={img_path}",
+                f"motion_seqs_dir={sequence_folder}",
+                f"motion_img_dir={motion_img_dir}",
+                f"vis_motion={CMD_BOOL[vis_motion]}",
+                f"motion_img_need_mask={CMD_BOOL[motion_img_need_mask]}",
+                f"render_fps={render_fps}",
+                f"motion_video_read_fps={motion_video_read_fps}",
+                f"export_video={CMD_BOOL[export_video]}",
+                f"export_gs={CMD_BOOL[export_gs]}",
+                f"export_mesh={CMD_BOOL[export_mesh]}",
+                f"image_dump={layout['image_dump']}",
+                f"mesh_dump={layout['mesh_dump']}",
+                f"video_dump={layout['video_dump']}",
+                f"save_tmp_dump={layout['save_tmp_dump']}",
+            ]
         try:
             run_command(cmd)
+            print("[INFO] Syncing results to NAS...")
             sync_uid_to_nas(uid, output_root, nas_root)
         except subprocess.CalledProcessError as exc:
             print(f"[ERROR] Failed on {uid}: {exc}")
@@ -195,6 +228,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-root", type=Path, default=DEFAULT_OUTPUT_ROOT)
     parser.add_argument("--nas-root", type=Path, default=DEFAULT_NAS_ROOT)
     parser.add_argument("--export-video", action="store_true", default=False)
+    parser.add_argument("--export-mesh", type=bool ,default=True)
     parser.add_argument("--no-export-gs", action="store_false", dest="export_gs")
     parser.add_argument("--render-fps", type=int, default=30)
     parser.add_argument("--motion-video-fps", type=int, default=30)
@@ -203,6 +237,20 @@ def parse_args() -> argparse.Namespace:
 
 if __name__ == "__main__":
     args = parse_args()
+    print("[INFO] Rendering the Cano PLY first")
+    # render_gs(
+    #     img_folder=args.images,
+    #     sequence_folder=args.motion,
+    #     model_name=args.model,
+    #     output_root=args.output_root,
+    #     nas_root=args.nas_root,
+    #     render_fps=args.render_fps,
+    #     motion_video_read_fps=args.motion_video_fps,
+    #     export_video=args.export_video,
+    #     export_gs=args.export_gs,
+    #     export_mesh=args.export_mesh,
+    # )
+    print("[INFO] Done with Cano PLY")
     render_gs(
         img_folder=args.images,
         sequence_folder=args.motion,
@@ -213,4 +261,6 @@ if __name__ == "__main__":
         motion_video_read_fps=args.motion_video_fps,
         export_video=args.export_video,
         export_gs=args.export_gs,
+        export_mesh=False, # second pass without the cano ply export
     )
+    print("[INFO] All done.")
