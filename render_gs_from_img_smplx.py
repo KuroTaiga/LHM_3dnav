@@ -23,8 +23,16 @@ DEFAULT_NAS_ROOT = Path("/mnt/nas/jiankundong/SHHQ_walk_fbx")
 CMD_BOOL = {True: "True", False: "False"}
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp", ".JPG", ".PNG"}
 
-def normalize_motion_jsons(sequence_folder: Path) -> None:
-    """Ensure every SMPL-X JSON uses the keys/shapes LHM expects."""
+
+def _zero_hand_template() -> list[list[float]]:
+    return [[0.0, 0.0, 0.0] for _ in range(15)]
+
+
+def normalize_motion_jsons(sequence_folder: Path, zero_hands: bool = False) -> None:
+    """Ensure every SMPL-X JSON uses the keys/shapes LHM expects.
+
+    If zero_hands is True, both hand poses are overwritten with zeros regardless of their prior values.
+    """
     rename_map = {
         "global_orient": "root_pose",
         "transl": "trans",
@@ -38,10 +46,7 @@ def normalize_motion_jsons(sequence_folder: Path) -> None:
         "leye_pose": [0.0, 0.0, 0.0],
         "reye_pose": [0.0, 0.0, 0.0],
     }
-    default_hands = {
-        "lhand_pose": [[0.0, 0.0, 0.0] for _ in range(15)],
-        "rhand_pose": [[0.0, 0.0, 0.0] for _ in range(15)],
-    }
+    default_hands = {"lhand_pose": _zero_hand_template(), "rhand_pose": _zero_hand_template()}
 
     json_files = sorted(sequence_folder.glob("*.json"))
     if not json_files:
@@ -70,10 +75,11 @@ def normalize_motion_jsons(sequence_folder: Path) -> None:
                 mutated = True
 
         for key, default in default_hands.items():
-            if key not in data:
-                # deep copy so later edits don’t mutate the template
-                data[key] = [row[:] for row in default]
-                mutated = True
+            if zero_hands or key not in data:
+                new_hand = [row[:] for row in default]
+                if key not in data or data[key] != new_hand:
+                    data[key] = new_hand
+                    mutated = True
 
         # Force tuple → list so JSON dumps cleanly
         for key in (*default_vectors.keys(), "betas", "focal", "princpt", "img_size_wh"):
@@ -137,6 +143,7 @@ def render_gs(
     export_video: bool = False,
     export_gs: bool = True,
     export_mesh: bool = True,
+    zero_hands: bool = False,
 ):
     if export_mesh:
         print("[INFO] export mesh set, cano ply will be exported and not the plys")
@@ -148,7 +155,7 @@ def render_gs(
         nas_root = nas_root / "gs"
     img_folder = img_folder.expanduser().resolve()
     sequence_folder = sequence_folder.expanduser().resolve()
-    normalize_motion_jsons(sequence_folder)
+    normalize_motion_jsons(sequence_folder, zero_hands=zero_hands)
     output_root = output_root.expanduser().resolve()
     nas_root = nas_root.expanduser().resolve()
 
@@ -228,39 +235,57 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-root", type=Path, default=DEFAULT_OUTPUT_ROOT)
     parser.add_argument("--nas-root", type=Path, default=DEFAULT_NAS_ROOT)
     parser.add_argument("--export-video", action="store_true", default=False)
-    parser.add_argument("--export-mesh", type=bool ,default=True)
+    parser.add_argument(
+        "--export-mesh",
+        action="store_true",
+        help="Run a canonical mesh pass (stored under output_root/cano)",
+    )
     parser.add_argument("--no-export-gs", action="store_false", dest="export_gs")
     parser.add_argument("--render-fps", type=int, default=30)
     parser.add_argument("--motion-video-fps", type=int, default=30)
+    parser.add_argument(
+        "--zero-hands",
+        action="store_true",
+        help="Overwrite lhand_pose and rhand_pose to all zeros after normalization",
+    )
     return parser.parse_args()
 
 
 if __name__ == "__main__":
     args = parse_args()
-    print("[INFO] Rendering the Cano PLY first")
-    # render_gs(
-    #     img_folder=args.images,
-    #     sequence_folder=args.motion,
-    #     model_name=args.model,
-    #     output_root=args.output_root,
-    #     nas_root=args.nas_root,
-    #     render_fps=args.render_fps,
-    #     motion_video_read_fps=args.motion_video_fps,
-    #     export_video=args.export_video,
-    #     export_gs=args.export_gs,
-    #     export_mesh=args.export_mesh,
-    # )
-    print("[INFO] Done with Cano PLY")
-    render_gs(
-        img_folder=args.images,
-        sequence_folder=args.motion,
-        model_name=args.model,
-        output_root=args.output_root,
-        nas_root=args.nas_root,
-        render_fps=args.render_fps,
-        motion_video_read_fps=args.motion_video_fps,
-        export_video=args.export_video,
-        export_gs=args.export_gs,
-        export_mesh=False, # second pass without the cano ply export
-    )
+    if args.export_mesh:
+        print("[INFO] Rendering the Cano PLY first")
+        render_gs(
+            img_folder=args.images,
+            sequence_folder=args.motion,
+            model_name=args.model,
+            output_root=args.output_root,
+            nas_root=args.nas_root,
+            render_fps=args.render_fps,
+            motion_video_read_fps=args.motion_video_fps,
+            export_video=args.export_video,
+            export_gs=False,  # canonical pass only
+            export_mesh=True,
+            zero_hands=args.zero_hands,
+        )
+        print("[INFO] Done with Cano PLY")
+
+    if args.export_gs:
+        print("[INFO] Rendering the GS sequence")
+        render_gs(
+            img_folder=args.images,
+            sequence_folder=args.motion,
+            model_name=args.model,
+            output_root=args.output_root,
+            nas_root=args.nas_root,
+            render_fps=args.render_fps,
+            motion_video_read_fps=args.motion_video_fps,
+            export_video=args.export_video,
+            export_gs=args.export_gs,
+            export_mesh=False, # second pass without the cano ply export
+            zero_hands=args.zero_hands,
+        )
+    else:
+        print("[INFO] Skipping GS export (--no-export-gs set)")
+
     print("[INFO] All done.")

@@ -152,6 +152,7 @@ class PoseEstimator:
             return SMPLXOutput(
                 beta=None,
                 is_full_body=False,
+                ratio=0.0,
                 msg=(
                     "more than one human detected"
                     if len(target_human) > 1
