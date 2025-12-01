@@ -21,6 +21,7 @@ MOTION_IMG_DIR="${MOTION_IMG_DIR:-None}"  # e.g., set to a folder or keep 'None'
 JOBS="${JOBS:-1}"   # >1 requires GNU parallel
 ZERO_HANDS="${ZERO_HANDS:-false}"
 ASYNC_MESH_SYNC="${ASYNC_MESH_SYNC:-true}"  # run rsync in background to avoid pausing renders
+BATCH_INFER="${BATCH_INFER:-true}"          # process all images in one LHM run to reuse the model load
 # ---------------------------------------------------------------
 
 usage() {
@@ -75,6 +76,7 @@ echo "MOTION_IMG_DIR    : $MOTION_IMG_DIR"
 echo "JOBS              : $JOBS"
 echo "ZERO_HANDS        : $ZERO_HANDS"
 echo "ASYNC_MESH_SYNC   : $ASYNC_MESH_SYNC"
+echo "BATCH_INFER       : $BATCH_INFER"
 echo
 
 if [[ "${ZERO_HANDS,,}" == "true" ]]; then
@@ -167,7 +169,33 @@ if [[ "${#IMAGES[@]}" -eq 0 ]]; then
 fi
 
 # Run (parallel if available & requested)
-if command -v parallel >/dev/null 2>&1 && [[ "$JOBS" -gt 1 ]]; then
+if [[ "${BATCH_INFER,,}" == "true" ]]; then
+  echo "[INFO] BATCH_INFER enabled: running a single LHM process for ${#IMAGES[@]} images to reuse model weights."
+  python -m LHM.launch infer.human_lrm \
+    model_name="$MODEL_NAME" \
+    motion_seqs_dir="$MOTION_SEQS_DIR" \
+    image_input="$IMAGE_DIR" \
+    video_dump="$OUT_ROOT/videos" \
+    image_dump="$OUT_ROOT/images" \
+    mesh_dump="$OUT_ROOT/meshes" \
+    save_tmp_dump="$OUT_ROOT/tmp" \
+    render_fps="$RENDER_FPS" \
+    motion_video_read_fps="$MOTION_READ_FPS" \
+    vis_motion="$VIS_MOTION" \
+    motion_img_need_mask="$MOTION_IMG_NEED_MASK" \
+    export_gs="$EXPORT_GS" \
+    motion_img_dir="$MOTION_IMG_DIR" \
+    export_video=false
+
+  if [[ "${ASYNC_MESH_SYNC,,}" == "true" ]]; then
+    rsync -a --info=progress2 "$OUT_ROOT/meshes"/ "$NAS_ROOT/meshes"/ &
+    pid=$!
+    RSYNC_PIDS+=("$pid")
+    echo "[INFO] Mesh sync running in background for batch (pid $pid)"
+  else
+    rsync -a --info=progress2 "$OUT_ROOT/meshes"/ "$NAS_ROOT/meshes"/
+  fi
+elif command -v parallel >/dev/null 2>&1 && [[ "$JOBS" -gt 1 ]]; then
   USE_PARALLEL=true
   printf '%s\0' "${IMAGES[@]}" | parallel -0 -j "$JOBS" do_one {}
 else
