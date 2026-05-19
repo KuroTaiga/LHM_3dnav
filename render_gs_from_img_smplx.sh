@@ -8,10 +8,11 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 # -------- Defaults (override via CLI env or flags below) --------
 MODEL_NAME="${MODEL_NAME:-LHM-1B-HF}"
-IMAGE_DIR="${IMAGE_DIR:-../../inputs/images/SHHQ-1.0_samples}"
-MOTION_SEQS_DIR="${MOTION_SEQS_DIR:-../../inputs/motion_seq_cleaned/walk_fbx}"
-OUT_ROOT="${OUT_ROOT:-exps/SHHQ_exp_new}"
-NAS_ROOT="${NAS_ROOT:-/mnt/nas/jiankundong/SHHQ_walk_fbx_relexed_hands}"   # <- verify path
+IMAGE_DIR="${IMAGE_DIR:-../../inputs/images/GPT}"
+# IMAGE_DIR="${IMAGE_DIR:-../../inputs/images/SHHQ-1.0_samples}"
+MOTION_SEQS_DIR="${MOTION_SEQS_DIR:-../../inputs/motion_seq_cleaned/waving}"
+OUT_ROOT="${OUT_ROOT:-exps/GPT/SHHQ_waving}"
+NAS_ROOT="${NAS_ROOT:-/mnt/nas/jiankundong/GPT/SHHQ_waving}"   # <- verify path
 EXPORT_GS="${EXPORT_GS:-true}"
 RENDER_FPS="${RENDER_FPS:-30}"
 MOTION_READ_FPS="${MOTION_READ_FPS:-30}"

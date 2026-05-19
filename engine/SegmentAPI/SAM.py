@@ -119,12 +119,15 @@ class SAM2Seg(BaseSeg):
     RATIO_MAP = [[512, 1], [1280, 0.6], [1920, 0.4], [3840, 0.2]]
 
     def tocpu(self):
-        self.box_prior.cpu()
+        # box_prior is created lazily on the first bbox prediction.
+        if self.box_prior is not None:
+            self.box_prior.cpu()
         self.image_predictor.model.cpu()
         torch.cuda.empty_cache()
 
     def tocuda(self):
-        self.box_prior.cuda()
+        if self.box_prior is not None:
+            self.box_prior.cuda()
         self.image_predictor.model.cuda()
 
     def __init__(
