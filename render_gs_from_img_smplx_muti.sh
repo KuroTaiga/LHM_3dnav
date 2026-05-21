@@ -19,13 +19,14 @@ VIS_MOTION="${VIS_MOTION:-true}"
 MOTION_IMG_NEED_MASK="${MOTION_IMG_NEED_MASK:-true}"
 MOTION_IMG_DIR="${MOTION_IMG_DIR:-None}"  # e.g., set to a folder or keep 'None'
 ZERO_HANDS="${ZERO_HANDS:-false}"
+FLAT_HAND_MEAN="${FLAT_HAND_MEAN:-false}"
 ASYNC_MESH_SYNC="${ASYNC_MESH_SYNC:-true}"  # run rsync in background to avoid pausing renders
 # ---------------------------------------------------------------
 
 usage() {
   cat <<EOF
 Usage: $(basename "$0") [--model NAME] [--images DIR] [--motions DIR] [--out DIR] [--nas DIR]
-                        [--export-gs true|false] [--zero-hands]
+                        [--export-gs true|false] [--zero-hands] [--flat-hand-mean]
                         [--render-fps N] [--motion-read-fps N]
                         [--vis-motion true|false] [--mask true|false] [--motion-img-dir PATH|None]
 
@@ -48,6 +49,7 @@ while [[ $# -gt 0 ]]; do
     --mask) MOTION_IMG_NEED_MASK="$2"; shift 2;;
     --motion-img-dir) MOTION_IMG_DIR="$2"; shift 2;;
     --zero-hands) ZERO_HANDS="true"; shift 1;;
+    --flat-hand-mean) FLAT_HAND_MEAN="true"; shift 1;;
     -h|--help) usage; exit 0;;
     *) echo "Unknown arg: $1"; usage; exit 1;;
   esac
@@ -69,6 +71,7 @@ echo "VIS_MOTION        : $VIS_MOTION"
 echo "MOTION_IMG_NEED_MASK : $MOTION_IMG_NEED_MASK"
 echo "MOTION_IMG_DIR    : $MOTION_IMG_DIR"
 echo "ZERO_HANDS        : $ZERO_HANDS"
+echo "FLAT_HAND_MEAN    : $FLAT_HAND_MEAN"
 echo "ASYNC_MESH_SYNC   : $ASYNC_MESH_SYNC"
 echo
 
@@ -110,6 +113,7 @@ python -m LHM.launch infer.human_lrm \
   vis_motion="$VIS_MOTION" \
   motion_img_need_mask="$MOTION_IMG_NEED_MASK" \
   export_gs="$EXPORT_GS" \
+  flat_hand_mean="$FLAT_HAND_MEAN" \
   motion_img_dir="$MOTION_IMG_DIR" \
   export_video=false
 

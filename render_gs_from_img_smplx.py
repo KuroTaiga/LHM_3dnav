@@ -144,6 +144,7 @@ def render_gs(
     export_gs: bool = True,
     export_mesh: bool = True,
     zero_hands: bool = False,
+    flat_hand_mean: bool = False,
 ):
     if export_mesh:
         print("[INFO] export mesh set, cano ply will be exported and not the plys")
@@ -188,6 +189,7 @@ def render_gs(
                 f"motion_video_read_fps={motion_video_read_fps}",
                 f"export_video={CMD_BOOL[export_video]}",
                 f"export_gs={CMD_BOOL[export_gs]}",
+                f"flat_hand_mean={CMD_BOOL[flat_hand_mean]}",
                 f"image_dump={layout['image_dump']}",
                 f"mesh_dump={layout['mesh_dump']}",
                 f"video_dump={layout['video_dump']}",
@@ -210,6 +212,7 @@ def render_gs(
                 f"export_video={CMD_BOOL[export_video]}",
                 f"export_gs={CMD_BOOL[export_gs]}",
                 f"export_mesh={CMD_BOOL[export_mesh]}",
+                f"flat_hand_mean={CMD_BOOL[flat_hand_mean]}",
                 f"image_dump={layout['image_dump']}",
                 f"mesh_dump={layout['mesh_dump']}",
                 f"video_dump={layout['video_dump']}",
@@ -248,6 +251,12 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Overwrite lhand_pose and rhand_pose to all zeros after normalization",
     )
+    parser.add_argument(
+        "--flat-hand-mean",
+        action="store_true",
+        default=False,
+        help="Use SMPL-X flat_hand_mean=True. Default keeps curved MANO mean hands when hand poses are zero.",
+    )
     return parser.parse_args()
 
 
@@ -267,6 +276,7 @@ if __name__ == "__main__":
             export_gs=False,  # canonical pass only
             export_mesh=True,
             zero_hands=args.zero_hands,
+            flat_hand_mean=args.flat_hand_mean,
         )
         print("[INFO] Done with Cano PLY")
 
@@ -284,6 +294,7 @@ if __name__ == "__main__":
             export_gs=args.export_gs,
             export_mesh=False, # second pass without the cano ply export
             zero_hands=args.zero_hands,
+            flat_hand_mean=args.flat_hand_mean,
         )
     else:
         print("[INFO] Skipping GS export (--no-export-gs set)")

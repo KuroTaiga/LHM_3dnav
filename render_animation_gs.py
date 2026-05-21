@@ -19,6 +19,7 @@ canonical_ply_path = "./exps/meshs/video_human_benchmark/human-lrm-1B/T_frontvie
 json_folder = "./outputs/custom_motion/T_frontview/walk_45/smplx_params"
 human_model_path = "./pretrained_models/human_model_files"
 gender = "neutral"
+flat_hand_mean = False
 # === OUTPUT DIRECTORY ===
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 output_dir = "./outputs/animated_3dgs"
@@ -54,6 +55,7 @@ smplx_model = SMPLXModel(
     expr_param_dim=10,
     cano_pose_type=0,
     apply_pose_blendshape=False,
+    flat_hand_mean=flat_hand_mean,
 ).to(device)
 
 # === LOAD CANONICAL BASE PARAM FOR TRANSFORM MATRIX ===
@@ -114,6 +116,7 @@ for frame_idx, fname in tqdm(enumerate(json_files), total=len(json_files)):
         gradient_checkpointing=False,
         apply_pose_blendshape=False,
         dense_sample_pts=40000,
+        flat_hand_mean=flat_hand_mean,
     )
 
 

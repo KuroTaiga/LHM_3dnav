@@ -764,6 +764,7 @@ class GS3DRenderer(nn.Module):
         gradient_checkpointing=False,
         apply_pose_blendshape=False,
         dense_sample_pts=40000,  # only use for dense_smaple_smplx
+        flat_hand_mean=True,
     ):
 
         super().__init__()
@@ -785,6 +786,7 @@ class GS3DRenderer(nn.Module):
                 expr_param_dim=expr_param_dim,
                 cano_pose_type=cano_pose_type,
                 apply_pose_blendshape=apply_pose_blendshape,
+                flat_hand_mean=flat_hand_mean,
             )
         elif self.smpl_type == "smplx_1":
             raise NotImplementedError("inference version does not support")
@@ -798,6 +800,7 @@ class GS3DRenderer(nn.Module):
                 cano_pose_type=cano_pose_type,
                 dense_sample_points=dense_sample_pts,
                 apply_pose_blendshape=apply_pose_blendshape,
+                flat_hand_mean=flat_hand_mean,
             )
         else:
             raise NotImplementedError

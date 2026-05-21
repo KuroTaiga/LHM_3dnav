@@ -21,6 +21,7 @@ MOTION_IMG_NEED_MASK="${MOTION_IMG_NEED_MASK:-true}"
 MOTION_IMG_DIR="${MOTION_IMG_DIR:-None}"  # e.g., set to a folder or keep 'None'
 JOBS="${JOBS:-1}"   # >1 requires GNU parallel
 ZERO_HANDS="${ZERO_HANDS:-false}"
+FLAT_HAND_MEAN="${FLAT_HAND_MEAN:-false}"
 ASYNC_MESH_SYNC="${ASYNC_MESH_SYNC:-true}"  # run rsync in background to avoid pausing renders
 BATCH_INFER="${BATCH_INFER:-true}"          # process all images in one LHM run to reuse the model load
 # ---------------------------------------------------------------
@@ -28,7 +29,7 @@ BATCH_INFER="${BATCH_INFER:-true}"          # process all images in one LHM run 
 usage() {
   cat <<EOF
 Usage: $(basename "$0") [--model NAME] [--images DIR] [--motions DIR] [--out DIR] [--nas DIR]
-                        [--export-gs true|false] [--jobs N] [--zero-hands]
+                        [--export-gs true|false] [--jobs N] [--zero-hands] [--flat-hand-mean]
                         [--render-fps N] [--motion-read-fas N]
                         [--vis-motion true|false] [--mask true|false] [--motion-img-dir PATH|None]
 
@@ -54,6 +55,7 @@ while [[ $# -gt 0 ]]; do
     --motion-img-dir) MOTION_IMG_DIR="$2"; shift 2;;
     --jobs) JOBS="$2"; shift 2;;
     --zero-hands) ZERO_HANDS="true"; shift 1;;
+    --flat-hand-mean) FLAT_HAND_MEAN="true"; shift 1;;
     -h|--help) usage; exit 0;;
     *) echo "Unknown arg: $1"; usage; exit 1;;
   esac
@@ -76,6 +78,7 @@ echo "MOTION_IMG_NEED_MASK : $MOTION_IMG_NEED_MASK"
 echo "MOTION_IMG_DIR    : $MOTION_IMG_DIR"
 echo "JOBS              : $JOBS"
 echo "ZERO_HANDS        : $ZERO_HANDS"
+echo "FLAT_HAND_MEAN    : $FLAT_HAND_MEAN"
 echo "ASYNC_MESH_SYNC   : $ASYNC_MESH_SYNC"
 echo "BATCH_INFER       : $BATCH_INFER"
 echo
@@ -141,6 +144,7 @@ do_one() {
     vis_motion="$VIS_MOTION" \
     motion_img_need_mask="$MOTION_IMG_NEED_MASK" \
     export_gs="$EXPORT_GS" \
+    flat_hand_mean="$FLAT_HAND_MEAN" \
     motion_img_dir="$MOTION_IMG_DIR" \
     export_video=false
 
@@ -157,7 +161,7 @@ do_one() {
 export -f do_one
 export MODEL_NAME MOTION_SEQS_DIR OUT_ROOT NAS_ROOT EXPORT_GS \
        RENDER_FPS MOTION_READ_FPS VIS_MOTION MOTION_IMG_NEED_MASK MOTION_IMG_DIR \
-       ASYNC_MESH_SYNC USE_PARALLEL
+       FLAT_HAND_MEAN ASYNC_MESH_SYNC USE_PARALLEL
 export -f mirror_mesh_and_cleanup
 
 # Collect images
@@ -185,6 +189,7 @@ if [[ "${BATCH_INFER,,}" == "true" ]]; then
     vis_motion="$VIS_MOTION" \
     motion_img_need_mask="$MOTION_IMG_NEED_MASK" \
     export_gs="$EXPORT_GS" \
+    flat_hand_mean="$FLAT_HAND_MEAN" \
     motion_img_dir="$MOTION_IMG_DIR" \
     export_video=false
 

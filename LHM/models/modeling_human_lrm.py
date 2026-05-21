@@ -147,6 +147,7 @@ class ModelHumanLRM(nn.Module):
             gradient_checkpointing=self.gradient_checkpointing,
             apply_pose_blendshape=kwargs.get("apply_pose_blendshape", False),
             dense_sample_pts=dense_sample_pts,
+            flat_hand_mean=kwargs.get("flat_hand_mean", False),
         )
 
         # face_id

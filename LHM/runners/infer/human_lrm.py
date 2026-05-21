@@ -388,7 +388,10 @@ class HumanLRMInferrer(Inferrer):
 
         hf_model_cls = wrap_model_hub(model_dict[self.EXP_TYPE])
 
-        model = hf_model_cls.from_pretrained(cfg.model_name)
+        model = hf_model_cls.from_pretrained(
+            cfg.model_name,
+            flat_hand_mean=cfg.get("flat_hand_mean", False),
+        )
         return model
 
     def _default_source_camera(

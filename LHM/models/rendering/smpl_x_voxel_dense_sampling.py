@@ -63,12 +63,18 @@ class SMPLX_Mesh(object):
         expr_param_dim=50,
         subdivide_num=2,
         cano_pose_type=0,
+        flat_hand_mean=True,
     ):
         """SMPLX using dense sampling"""
         super().__init__()
         self.human_model_path = human_model_path
         self.shape_param_dim = shape_param_dim
         self.expr_param_dim = expr_param_dim
+        if isinstance(flat_hand_mean, str):
+            flat_hand_mean = flat_hand_mean.strip().lower() in {"1", "true", "yes", "on"}
+        else:
+            flat_hand_mean = bool(flat_hand_mean)
+        self.flat_hand_mean = flat_hand_mean
         if shape_param_dim == 10 and expr_param_dim == 10:
             self.layer_arg = {
                 "create_global_orient": False,
@@ -91,7 +97,7 @@ class SMPLX_Mesh(object):
                     num_expression_coeffs=self.expr_param_dim,
                     use_pca=False,
                     use_face_contour=False,
-                    flat_hand_mean=True,
+                    flat_hand_mean=self.flat_hand_mean,
                     **self.layer_arg,
                 )
                 for gender in ["neutral", "male", "female"]
@@ -118,7 +124,7 @@ class SMPLX_Mesh(object):
                     num_expression_coeffs=self.expr_param_dim,
                     use_pca=False,
                     use_face_contour=True,
-                    flat_hand_mean=True,
+                    flat_hand_mean=self.flat_hand_mean,
                     **self.layer_arg,
                 )
                 for gender in ["neutral", "male", "female"]
@@ -492,6 +498,7 @@ class SMPLXVoxelMeshModel(nn.Module):
         body_face_ratio=3,
         dense_sample_points=40000,
         apply_pose_blendshape=False,
+        flat_hand_mean=True,
     ) -> None:
         super().__init__()
 
@@ -501,6 +508,7 @@ class SMPLXVoxelMeshModel(nn.Module):
             expr_param_dim=expr_param_dim,
             subdivide_num=subdivide_num,
             cano_pose_type=cano_pose_type,
+            flat_hand_mean=flat_hand_mean,
         )
         self.smplx_layer = copy.deepcopy(self.smpl_x.layer[gender])
 

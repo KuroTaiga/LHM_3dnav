@@ -51,6 +51,12 @@ def avaliable_device():
     return device
 
 
+def _coerce_bool(value):
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return bool(value)
+
+
 class SMPLX(object):
     def __init__(
         self,
@@ -59,12 +65,14 @@ class SMPLX(object):
         expr_param_dim=50,
         subdivide_num=2,
         cano_pose_type=0,
+        flat_hand_mean=True,
     ):
         """SMPLX using pytorch3d subdivsion"""
         super().__init__()
         self.human_model_path = human_model_path
         self.shape_param_dim = shape_param_dim
         self.expr_param_dim = expr_param_dim
+        self.flat_hand_mean = _coerce_bool(flat_hand_mean)
         if shape_param_dim == 10 and expr_param_dim == 10:
             self.layer_arg = {
                 "create_global_orient": False,
@@ -87,7 +95,7 @@ class SMPLX(object):
                     num_expression_coeffs=self.expr_param_dim,
                     use_pca=False,
                     use_face_contour=False,
-                    flat_hand_mean=True,
+                    flat_hand_mean=self.flat_hand_mean,
                     **self.layer_arg,
                 )
                 for gender in ["neutral", "male", "female"]
@@ -114,7 +122,7 @@ class SMPLX(object):
                     num_expression_coeffs=self.expr_param_dim,
                     use_pca=False,
                     use_face_contour=True,
-                    flat_hand_mean=True,
+                    flat_hand_mean=self.flat_hand_mean,
                     **self.layer_arg,
                 )
                 for gender in ["neutral", "male", "female"]
@@ -520,6 +528,7 @@ class SMPLXModel(nn.Module):
         shape_param_dim=100,
         cano_pose_type=0,
         apply_pose_blendshape=False,
+        flat_hand_mean=True,
     ) -> None:
         super().__init__()
 
@@ -531,12 +540,14 @@ class SMPLXModel(nn.Module):
         #     cano_pose_type=cano_pose_type,
         # )
 
+        self.flat_hand_mean = _coerce_bool(flat_hand_mean)
         self.smpl_x = SMPLX(
             human_model_path=human_model_path,
             shape_param_dim=shape_param_dim,
             expr_param_dim=expr_param_dim,
             subdivide_num=subdivide_num,
             cano_pose_type=cano_pose_type,
+            flat_hand_mean=self.flat_hand_mean,
         )
         self.smplx_layer = copy.deepcopy(self.smpl_x.layer[gender])
 
